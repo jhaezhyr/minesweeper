@@ -331,6 +331,7 @@ p {
   display: flex;
   justify-items: center;
   align-content: center;
+  background-color: white;
 }
 
 .field-box {
