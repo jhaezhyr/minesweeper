@@ -1,8 +1,8 @@
 const mongoose = require('mongoose');
 const bodyParser = require("body-parser");
 const express = require('express');
-const extras = require('../front-end/public/extras.js');
-const { chunkLocAt, localLocToIndex, refTo, refToLocal } = require('../front-end/public/extras.js');
+const extras = require('../client/public/extras.js');
+const { chunkLocAt, localLocToIndex, refTo, refToLocal } = require('../client/public/extras.js');
 
 // connect to the database
 mongoose.connect('mongodb://localhost:27017/minesweeper', {
@@ -36,7 +36,7 @@ const playerSchema = new mongoose.Schema({
 const Player = mongoose.model('Player', playerSchema);
 
 let map = {
-	chunks: [],
+	chunkDictionary: new Map(),
 	modifiedChunks: new Set(), // To be saved
 	invalidChunks: new Set(), // To be deleted
 	exploredRadius: 0,
@@ -45,68 +45,105 @@ let map = {
 	invalidPlayers: new Set(),
 
 	async load() {
+		const now = Date.now();
 		try {
 			console.log(`Loading chunks.`);
-			debugger
-			this.chunks = Array.from(await Chunk.find());
+			this.chunkDictionary = new Map();
+			for (const c of Array.from(await Chunk.find())) {
+				this.replaceChunk(c); // That'll do some extra work, including adding it to modifiedChunks, but that'll be set to [] again in a couple lines.
+			}
+			//Array.from(await Chunk.find()).forEach(this.addChunk);
 			this.players = Array.from(await Player.find());
 			this.modifiedChunks = new Set();
 			this.invalidChunks = new Set();
 			this.modifiedPlayers = new Set();
 			this.invalidPlayers = new Set();
-			console.log(`Loaded ${this.chunks.length} chunks.`);
+			console.log(`Loaded ${this.chunkDictionary.size} chunks.`);
 			console.log(`Loaded ${this.players.length} players.`);
 		} catch (err) {
 			console.error(err);
 		}
+		console.log(`Completed load in ${Date.now() - now} milliseconds`);
 	},
 	async save() {
-		// Chunks
-		for (const chunk of this.modifiedChunks) {
-			await chunk.save();
-		}
-		if (this.modifiedChunks.size > 0) {
-			console.log(`Saved ${this.modifiedChunks.size} chunks.`);
-		}
-		this.modifiedChunks = new Set();
-		
-		for (const chunk of this.invalidChunks) {
-			await chunk.deleteOne();
-		}
-		if (this.invalidChunks.size > 0) {
-			console.log(`Deleted ${this.invalidChunks.size} chunks.`);
-		}
-		this.invalidChunks = new Set();
+		const now = Date.now();
+		try {
+			// Chunks
+			for (const chunk of this.modifiedChunks) {
+				try {
+					await chunk.save();
+				} catch (err) {
+					console.error(err);
+				}
+			}
+			if (this.modifiedChunks.size > 0) {
+				console.log(`Saved ${this.modifiedChunks.size} chunks.`);
+			}
+			this.modifiedChunks = new Set();
+			
+			for (const chunk of this.invalidChunks) {
+				try {
+					await chunk.deleteOne();
+				} catch (err) {
+					console.error(err);
+				}
+			}
+			if (this.invalidChunks.size > 0) {
+				console.log(`Deleted ${this.invalidChunks.size} chunks.`);
+			}
+			this.invalidChunks = new Set();
 
-		//Players
-		for (const player of this.modifiedPlayers) {
-			await player.save();
+			//Players
+			for (const player of this.modifiedPlayers) {
+				try {
+					await player.save();
+				} catch (err) {
+					console.error(err);
+				}
+			}
+			if (this.modifiedPlayers.size > 0) {
+				console.log(`Saved ${this.modifiedPlayers.size} players.`);
+			}
+			this.modifiedPlayers = new Set();
+			
+			for (const player of this.invalidPlayers) {
+				try {
+					await player.deleteOne();
+				} catch (err) {
+					console.error(err);
+				}
+			}
+			if (this.invalidPlayers.size > 0) {
+				console.log(`Deleted ${this.invalidPlayers.size} players.`);
+			}
+			this.invalidPlayers = new Set();
+		} catch (err) {
+			console.error(err);
 		}
-		if (this.modifiedPlayers.size > 0) {
-			console.log(`Saved ${this.modifiedPlayers.size} players.`);
-		}
-		this.modifiedPlayers = new Set();
-		
-		for (const player of this.invalidPlayers) {
-			await player.deleteOne();
-		}
-		if (this.invalidPlayers.size > 0) {
-			console.log(`Deleted ${this.invalidPlayers.size} players.`);
-		}
-		this.invalidPlayers = new Set();
+		console.log(`Completed save() in ${Date.now() - now} milliseconds`);
 	},
 	removePlayer(player) {
 		this.invalidPlayers.add(player);
 		const index = this.players.indexOf(player);
 		this.players.splice(index, 1);
 	},
-	removeChunk(chunk) {
-		this.invalidChunks.add(chunk);
-		const index = this.chunks.indexOf(chunk);
-		this.chunks.splice(index, 1);
+	replaceChunk(chunk) { // This is also used as an 'addChunk' function.
+		const oldChunk = this.chunkDictionary.get(`${chunk.u},${chunk.v}`);
+		if (oldChunk) {
+			this.invalidChunks.add(oldChunk);
+		}
+		this.chunkDictionary.set(`${chunk.u},${chunk.v}`, chunk);
+		this.modifiedChunks.add(chunk);
+	},
+	deleteChunkAt(u, v) {
+		const oldChunk = this.chunkDictionary.get(`${u},${v}`);
+		if (oldChunk) {
+			this.invalidChunks.add(oldChunk);
+		}
+		this.chunkDictionary.delete(`${oldChunk.u},${oldChunk.v}`, undefined);
 	},
 	isUnexplored(chunk) {
-		if (!chunk) {
+		if (this.isInvalidChunk(chunk)) {
 			return true;
 		}
 		for (let locy = 0; locy < extras.chunkSize; locy++) {
@@ -119,6 +156,9 @@ let map = {
 
 		return true;
 	},
+	isInvalidChunk(chunk) {
+		return (!chunk || !chunk.data || chunk.data.length != extras.chunkSize*extras.chunkSize || typeof chunk.u !== 'number' || typeof chunk.v !== 'number');
+	},
 	unexploredChunkLoc() { // Returns the u/v of some chunk that is near the map but HASN'T been explored at all.
 		let r = this.exploredRadius + 1;
 		while (true) {
@@ -128,7 +168,7 @@ let map = {
 			// +u side
 			u = r;
 			for (v = -r; v <= r; v++) {
-				if (this.isUnexplored(this.chunks.find(c => (c.u === u && c.v === v)))) {
+				if (this.isUnexplored(this.chunkAt(u,v))) {
 					// An ungenerated chunk!
 					return { u, v };
 				}
@@ -136,7 +176,7 @@ let map = {
 			// -u side
 			u = -r;
 			for (v = -r; v <= r; v++) {
-				if (this.isUnexplored(this.chunks.find(c => (c.u === u && c.v === v)))) {
+				if (this.isUnexplored(this.chunkAt(u,v))) {
 					// An ungenerated chunk!
 					return { u, v };
 				}
@@ -144,7 +184,7 @@ let map = {
 			// +v side
 			v = r;
 			for (u = -r + 1; u < r; u++) {
-				if (this.isUnexplored(this.chunks.find(c => (c.u === u && c.v === v)))) {
+				if (this.isUnexplored(this.chunkAt(u,v))) {
 					// An ungenerated chunk!
 					return { u, v };
 				}
@@ -152,7 +192,7 @@ let map = {
 			// -v side
 			v = -r;
 			for (u = -r + 1; u < r; u++) {
-				if (this.isUnexplored(this.chunks.find(c => (c.u === u && c.v === v)))) {
+				if (this.isUnexplored(this.chunkAt(u,v))) {
 					// An ungenerated chunk!
 					return { u, v };
 				}
@@ -165,8 +205,10 @@ let map = {
 
 	generateChunkAt(u, v) {
 		// Generate the new chunk!
+		const bombsToAdd = extras.minBombsPerChunk + Math.floor(Math.random() * (1 + extras.maxBombsPerChunk - extras.minBombsPerChunk));
+		console.log(bombsToAdd);
 		let data = extras.emptyUndiscovered.repeat(extras.chunkSize*extras.chunkSize);
-		for (let i = 0; i < extras.bombsPerChunk; i++) {
+		for (let i = 0; i < bombsToAdd; i++) {
 			const randIndex = Math.floor(Math.random() * extras.chunkSize * extras.chunkSize);
 			data = extras.replaceAt(data, randIndex, extras.bombUndiscovered);
 		}
@@ -175,46 +217,42 @@ let map = {
 			v: v,
 			data,
 		});
-		this.chunks.push(chunk);
-		this.modifiedChunks.add(chunk);
+		this.replaceChunk(chunk);
 		console.log("New chunk generated.");
 		return chunk;
 	},
 
 	chunkAt(u, v) { // Must return a valid chunk, even if it has to generate it and/or scrap the existing one.
-		let chunk = this.chunks.find(c => (c.u === u && c.v === v));
-		if (!chunk || !chunk.data || chunk.data.length != extras.chunkSize*extras.chunkSize) {
-			if (chunk)
-				this.removeChunk(chunk);
-			// Generate the new chunk!
+		let chunk = this.chunkDictionary.get(`${u},${v}`);
+		if (this.isInvalidChunk(chunk)) {
+			if (chunk) {
+				console.error(`Invalid chunk: ${chunk}`);
+			}
 			chunk = this.generateChunkAt(u, v);
 		}
 		return chunk;
 	},
 
 	chunkWithID(id) { // May return a valid chunk, or undefined if none exists with this id.
-		return this.chunks.find(c => c._id.toString() === id);
+		for (const c of this.chunkDictionary.values()) {
+			if (c._id.toString() === id) {
+				return c;
+			}
+		}
+		return undefined;
 	},
 	
 	chunksIn(umin, umax, vmin, vmax) { // Must return valid chunks.
 		if (umax < umin || vmax < vmin) {
 			throw "Invalid arguments to getter.  Nyah!";
 		}
-
-		let chunks = this.chunks.filter(c => (c.u >= umin) && (c.u <= umax) && (c.v >= vmin) && (c.v <= vmax));
+		
+		let chunks = [];
 		for (let i = umin; i <= umax; i++) {
 			for (let j = vmin; j <= vmax; j++) {
 				// Check that every value really is there.  Generate any missing or invalid ones.
-				let rightChunkIndex = chunks.findIndex(c => (c.u === i && c.v === j));
-				let rightChunk = chunks[rightChunkIndex];
-				if (rightChunkIndex === -1) {
-					rightChunk = this.generateChunkAt(i,j);
-					chunks.push(rightChunk);
-				} else if (!rightChunk.data || rightChunk.data.length != extras.chunkSize * extras.chunkSize) {
-					this.removeChunk(rightChunk);
-					rightChunk = this.generateChunkAt(i,j);
-					chunks.push(rightChunk);
-				}
+				let rightChunk = this.chunkAt(i,j);
+				chunks.push(rightChunk);
 			}
 		}
 		return chunks;
@@ -234,11 +272,14 @@ app.use(bodyParser.urlencoded({
 
 
 app.get('/api/chunk/:u/:v', async (req, res) => { // Gets the chunk with 
+	const now = Date.now();
 	let chunk = map.chunkAt(parseInt(req.params.u), parseInt(req.params.v));
 	res.send(chunk);
+	console.log(`Completed get(/api/chunk/:u/:v) request in ${Date.now() - now} milliseconds`);
 });
 
 app.get('/api/chunks/:umin-:umax/:vmin-:vmax', async (req, res) => { // Gets the chunk with 
+	const now = Date.now();
 	try {
 		const umin = parseInt(req.params.umin);
 		const umax = parseInt(req.params.umax);
@@ -250,9 +291,11 @@ app.get('/api/chunks/:umin-:umax/:vmin-:vmax', async (req, res) => { // Gets the
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed get(/api/chunks/:umin-:umax/:vmin-:vmax) request in ${Date.now() - now} milliseconds`);
 });
 
 app.put('/api/chunk/:id', async (req, res) => {
+	const now = Date.now();
 	try {
 		const chunk = map.chunkWithID(req.params.id);
 		if (chunk) {
@@ -265,9 +308,11 @@ app.put('/api/chunk/:id', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed put(/api/chunk/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.get('/api/scoreboard/', async (_req, res) => {
+	const now = Date.now();
 	try {
 		const scores = Array.from(await Score.find({}).sort({ score: 'desc'}).limit(5));
 		res.send(scores);
@@ -275,9 +320,11 @@ app.get('/api/scoreboard/', async (_req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed get(/api/scoreboard/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.post('/api/scoreboard/', async (req, res) => {
+	const now = Date.now();
 	try {
 		const score = new Score({
 			score: req.body.score,
@@ -289,6 +336,7 @@ app.post('/api/scoreboard/', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed post(/api/scoreboard/) request in ${Date.now() - now} milliseconds`);
 });
 
 app.delete('/api/scoreboard/:id', async (req, res) => {
@@ -303,9 +351,11 @@ app.delete('/api/scoreboard/:id', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed delete(/api/scoreboard/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.post('/api/player/', async (_req, res) => { // Makes a new player
+	const now = Date.now();
 	try {
 		const symbol = extras.playerSymbols[Math.floor(Math.random() * extras.playerSymbols.length)];
 		const chunkLoc = map.unexploredChunkLoc();
@@ -327,18 +377,20 @@ app.post('/api/player/', async (_req, res) => { // Makes a new player
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed get(/api/player/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.put('/api/player/:id', async (req, res) => {
+	const now = Date.now();
 	try {
 		const player = map.players.find(p => p._id == req.params.id);
 		if (!player) {
 			throw `Couldn't find player with id ${req.params.id}`
 		}
-		if (req.body.x) {
+		if (req.body.x !== undefined) {
 			player.x = req.body.x;
 		}
-		if (req.body.y) {
+		if (req.body.y !== undefined) {
 			player.y = req.body.y;
 		}
 		map.modifiedPlayers.add(player);
@@ -347,18 +399,22 @@ app.put('/api/player/:id', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed put(/api/player/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.get('/api/players', async (req, res) => {
+	const now = Date.now();
 	try {
 		res.send(map.players);
 	} catch (error) {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed get(/api/players) request in ${Date.now() - now} milliseconds`);
 });
 
 app.get('/api/player/:id', async (req, res) => {
+	const now = Date.now();
 	try {
 		const player = map.players.find(p => p._id == req.params.id);
 		if (!player) {
@@ -369,9 +425,11 @@ app.get('/api/player/:id', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed get(/api/player/:id) request in ${Date.now() - now} milliseconds`);
 });
 
 app.delete('/api/player/:id', async (req, res) => {
+	const now = Date.now();
 	try {
 		const player = map.players.find(p => p._id == req.params.id);
 		if (!player) {
@@ -383,6 +441,29 @@ app.delete('/api/player/:id', async (req, res) => {
 		console.log(error);
 		res.sendStatus(500);
 	}
+	console.log(`Completed delete(/api/player/:id) request in ${Date.now() - now} milliseconds`);
+});
+
+app.post('/api/chunks/clean', async (_req, res) => {
+	const now = Date.now();
+	try {
+		let chunksDeleted = 0;
+		for (const [loc, chunk] of map.chunkDictionary) {
+			if (map.isUnexplored(chunk)) {
+				// An unexplored chunk!
+				map.deleteChunkAt(chunk.u, chunk.v);
+				chunksDeleted++;
+			}
+		}
+		console.log(`Deleted ${chunksDeleted} unexplored chunks.`);
+		res.send({ deleted: chunksDeleted });
+		map.generateChunkAt(0,0);
+		map.exploredRadius = 0;
+	} catch (err) {
+		console.error(err);
+		res.sendStatus(500);
+	}
+	console.log(`Completed delete(/api/chunks/clean) request in ${Date.now() - now} milliseconds`);
 });
 
 

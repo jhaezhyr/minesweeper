@@ -36,6 +36,11 @@
 			</table>
 			<button @click="updateScores">Update</button>
 		</div>
+		<div class="section">
+			<h2>Chunks</h2>
+			<button @click="cleanChunks">Clear out undiscovered chunks</button>
+			<p>{{response}}</p>
+		</div>
 	</div>
 </div>
 </template>
@@ -77,6 +82,7 @@ export default {
 		return {
 			players: [],
 			scores: [],
+			response: '',
 		};
 	},
 	methods: {
@@ -93,6 +99,9 @@ export default {
 		async deleteScore(score) {
 			await axios.delete(`/api/scoreboard/${score._id}`);
 			await this.updateScores();
+		},
+		async cleanChunks() {
+			this.response = `Deleted ${(await axios.post('/api/chunks/clean')).data.deleted} chunks.`;
 		}
 	},
 	mounted() {

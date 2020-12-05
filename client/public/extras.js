@@ -115,16 +115,20 @@ const extras = {
 	digitDisplay: ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣",'5️⃣','6️⃣','7️⃣',"8️⃣"],
 	flaggedDisplay: "🏴",
 	playerDisplay: "😊",
+	invalidDisplay: "🟥",
 
-	playerSymbols: ['😊','❤','👍','✔','🌹','🎉','🎶','🎆','🍕','🌘'],
+	playerSymbols: ['😊','👍','🌹','🎉','🎶','🎆','🍕','🌘','🐱‍👤','🦄','🎈','💎','⚾','🎲','🎺','🍉','🌎','🔥','⭐'],
 	//playerSymbols: ['!','@','#','$','%','^','&','*','+','|'],
 
 	falseFlagPoints: -10,
 	travelPoints: 1,
 	trueFlagPoints: 10,
+	discoveryBonus: 250,
+	discoveryBonusDistance: 75,
 
 	chunkSize: 6,
-	bombsPerChunk: 4,
+	minBombsPerChunk: 3,
+	maxBombsPerChunk: 6,
 };
 
 module.exports = extras;
