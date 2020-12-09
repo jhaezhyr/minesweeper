@@ -11,6 +11,7 @@
       <li>1 point: Discover a clear tile</li>
       <li>10 points: Flag a bomb tile</li>
       <li>-10 points: Flag a clear tile</li>
+      <li>250 points: Travel 75 tiles horizontally or vertically from your starting point</li>
     </ul>
     <p>Check the scoreboard to see this week's minehunting heroes!</p>
     <p>That's all you'll need to know, soldier. Ready, march!</p>

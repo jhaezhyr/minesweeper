@@ -295,9 +295,6 @@ export default {
         }
       }
       this.lines = result;
-      this.whatsHere = this.needs.whatsHere;
-      this.myScore += this.needs.scoreShift;
-      this.needs.scoreShift = 0;
     },
     reveal(dx, dy, flagging) {
       const extras = this.$root.$data;
@@ -358,8 +355,8 @@ export default {
         return;
       }
       const extras = this.$root.$data;
-      const there = this.reveal(dx, dy, true);
-      if (there.isDiscovered) {
+      const { here: there, wasUndiscovered } = this.reveal(dx, dy, true);
+      if (!wasUndiscovered) {
         // Do nothing.
       } else if (there.isBomb) {
         // It's a bomb!
@@ -393,6 +390,9 @@ export default {
       if (this.needs.render) {
         this.renderChunks();
       }
+      this.whatsHere = this.needs.whatsHere;
+      this.myScore += this.needs.scoreShift;
+      this.needs.scoreShift = 0;
       this.needs.render = false;
 
       this.waiting = false;
